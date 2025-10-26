@@ -1,8 +1,6 @@
 streamlit
 gtts
 speechrecognition
-phonetics
 streamlit-webrtc
 soundfile
 numpy
-av==10.0.0
