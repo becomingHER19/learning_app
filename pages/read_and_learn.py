@@ -1,16 +1,16 @@
 import streamlit as st
 import pyttsx3
 import difflib
-import sounddevice as sd
-import wavio
 import tempfile
 import speech_recognition as sr
 import time
-import threading
 import json
-import os
 import phonetics
 from gtts import gTTS
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase
+import numpy as np
+import av
+import soundfile as sf
 
 # ---------------------------
 # PAGE CONFIG
@@ -101,91 +101,106 @@ if story_title:
         highlight_placeholder.empty()
 
     # ---------------------------
-    # Record user reading
+    # Record user reading (cloud-compatible)
     st.write("🎤 Record yourself reading the story")
     duration = st.slider("Recording duration (seconds)", 5, 60, 20)
+
+    class AudioProcessor(AudioProcessorBase):
+        def __init__(self):
+            self.frames = []
+        def recv(self, frame: av.AudioFrame) -> av.AudioFrame:
+            pcm = frame.to_ndarray()
+            self.frames.append(pcm)
+            return frame
+
     if st.button("Record Reading"):
-        st.info("Recording...")
-        recording = sd.rec(int(duration*44100), samplerate=44100, channels=1)
-        sd.wait()
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-        wavio.write(temp_file.name, recording, 44100, sampwidth=2)
-        st.success("Recording saved!")
-        st.audio(temp_file.name, format='audio/wav')
+        st.info("Recording... Click Stop when finished.")
+        webrtc_ctx = webrtc_streamer(key="audio", audio_processor_factory=AudioProcessor, media_stream_constraints={"audio": True, "video": False})
 
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(temp_file.name) as source:
-            audio_data = recognizer.record(source)
-            try:
-                child_text = recognizer.recognize_google(audio_data)
-                st.write("🗣️ You said:")
-                st.write(child_text)
+        if webrtc_ctx.audio_processor and webrtc_ctx.state.playing:
+            st.warning("Recording in progress...")
+        elif webrtc_ctx.audio_processor and not webrtc_ctx.state.playing:
+            frames = webrtc_ctx.audio_processor.frames
+            if frames:
+                audio_data = np.concatenate(frames, axis=1)
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+                sf.write(temp_file.name, audio_data.T, 48000)
+                st.success("Recording saved!")
+                st.audio(temp_file.name, format='audio/wav')
 
                 # ---------------------------
-                # Phonics-aware comparison
-                def check_words(story_words, child_words, threshold=0.8):
-                    comparison_html = ""
-                    skipped_words, extra_words = [], []
-                    i,j = 0,0
-                    while i < len(story_words) and j < len(child_words):
-                        word_story = story_words[i].lower()
-                        word_child = child_words[j].lower()
-                        ratio = difflib.SequenceMatcher(None, word_story, word_child).ratio()
-                        # Phonetic match
-                        phonetic_match = phonetics.metaphone(word_story) == phonetics.metaphone(word_child)
-                        if ratio > threshold or phonetic_match:
-                            comparison_html += f"<span class='correct'>{story_words[i]} </span>"
-                            i+=1
-                            j+=1
+                # Transcribe
+                recognizer = sr.Recognizer()
+                with sr.AudioFile(temp_file.name) as source:
+                    audio_data = recognizer.record(source)
+                    try:
+                        child_text = recognizer.recognize_google(audio_data)
+                        st.write("🗣️ You said:")
+                        st.write(child_text)
+
+                        # ---------------------------
+                        # Phonics-aware comparison
+                        def check_words(story_words, child_words, threshold=0.8):
+                            comparison_html = ""
+                            skipped_words, extra_words = [], []
+                            i,j = 0,0
+                            while i < len(story_words) and j < len(child_words):
+                                word_story = story_words[i].lower()
+                                word_child = child_words[j].lower()
+                                ratio = difflib.SequenceMatcher(None, word_story, word_child).ratio()
+                                phonetic_match = phonetics.metaphone(word_story) == phonetics.metaphone(word_child)
+                                if ratio > threshold or phonetic_match:
+                                    comparison_html += f"<span class='correct'>{story_words[i]} </span>"
+                                    i+=1
+                                    j+=1
+                                else:
+                                    comparison_html += f"<span class='skipped'>{story_words[i]} </span>"
+                                    skipped_words.append(story_words[i])
+                                    i+=1
+                            for w in story_words[i:]:
+                                comparison_html += f"<span class='skipped'>{w} </span>"
+                                skipped_words.append(w)
+                            for w in child_words[j:]:
+                                comparison_html += f"<span class='extra'>{w} </span>"
+                                extra_words.append(w)
+                            return comparison_html, skipped_words, extra_words
+
+                        child_words = child_text.split()
+                        comparison_html, skipped_words, extra_words = check_words(story_words, child_words)
+
+                        st.markdown("### Word-by-word comparison:")
+                        st.markdown(comparison_html, unsafe_allow_html=True)
+
+                        # ---------------------------
+                        # Feedback + gamification
+                        feedback_msg = "<div class='feedback'><h4>Reading Feedback:</h4>"
+                        if skipped_words:
+                            feedback_msg += "<b>Skipped/Misread words:</b> " + ", ".join(skipped_words) + "<br>"
+                            feedback_msg += "<b>Tip:</b> Practice these words slowly and clearly.<br>"
+                        if extra_words:
+                            feedback_msg += "<b>Extra words:</b> " + ", ".join(extra_words) + "<br>"
+                        if not skipped_words and not extra_words:
+                            feedback_msg += "✅ Excellent! You read all words correctly! 🎉"
+                            st.balloons()
+                            st.session_state["points"] += len(story_words)
+                            feedback_msg += f"<br>🎯 Points earned: {st.session_state['points']}"
                         else:
-                            comparison_html += f"<span class='skipped'>{story_words[i]} </span>"
-                            skipped_words.append(story_words[i])
-                            i+=1
-                    for w in story_words[i:]:
-                        comparison_html += f"<span class='skipped'>{w} </span>"
-                        skipped_words.append(w)
-                    for w in child_words[j:]:
-                        comparison_html += f"<span class='extra'>{w} </span>"
-                        extra_words.append(w)
-                    return comparison_html, skipped_words, extra_words
+                            st.session_state["points"] += max(0, len(story_words) - len(skipped_words))
+                            feedback_msg += f"<br>🎯 Points earned: {st.session_state['points']}"
+                        feedback_msg += "</div>"
+                        st.markdown(feedback_msg, unsafe_allow_html=True)
 
-                child_words = child_text.split()
-                comparison_html, skipped_words, extra_words = check_words(story_words, child_words)
+                        # Update streak
+                        from datetime import date
+                        today = date.today()
+                        if st.session_state.get("last_played") != today:
+                            st.session_state["streak"] += 1
+                            st.session_state["last_played"] = today
+                        st.info(f"🔥 Current streak: {st.session_state['streak']} days")
 
-                st.markdown("### Word-by-word comparison:")
-                st.markdown(comparison_html, unsafe_allow_html=True)
-
-                # ---------------------------
-                # Feedback + gamification
-                feedback_msg = "<div class='feedback'><h4>Reading Feedback:</h4>"
-                if skipped_words:
-                    feedback_msg += "<b>Skipped/Misread words:</b> " + ", ".join(skipped_words) + "<br>"
-                    feedback_msg += "<b>Tip:</b> Practice these words slowly and clearly.<br>"
-                if extra_words:
-                    feedback_msg += "<b>Extra words:</b> " + ", ".join(extra_words) + "<br>"
-                if not skipped_words and not extra_words:
-                    feedback_msg += "✅ Excellent! You read all words correctly! 🎉"
-                    st.balloons()
-                    st.session_state["points"] += len(story_words)
-                    feedback_msg += f"<br>🎯 Points earned: {st.session_state['points']}"
-                else:
-                    # Partial points
-                    st.session_state["points"] += max(0, len(story_words) - len(skipped_words))
-                    feedback_msg += f"<br>🎯 Points earned: {st.session_state['points']}"
-                feedback_msg += "</div>"
-                st.markdown(feedback_msg, unsafe_allow_html=True)
-
-                # Update streak
-                from datetime import date
-                today = date.today()
-                if st.session_state.get("last_played") != today:
-                    st.session_state["streak"] += 1
-                    st.session_state["last_played"] = today
-                st.info(f"🔥 Current streak: {st.session_state['streak']} days")
-
-            except Exception as e:
-                st.write("⚠️ Could not transcribe audio. Try again.")
-                st.write(e)
+                    except Exception as e:
+                        st.write("⚠️ Could not transcribe audio. Try again.")
+                        st.write(e)
 
     # ---------------------------
     # Next Story button

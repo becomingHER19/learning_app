@@ -2,10 +2,14 @@ import streamlit as st
 import random
 
 # ------------------- Page config -------------------
-st.set_page_config(
-    page_title="LexiAI Dashboard",
-    layout="wide",
-)
+st.set_page_config(page_title="LexiAI Dashboard", layout="wide")
+
+# ------------------- Initialize session state -------------------
+if 'page' not in st.session_state:
+    st.session_state['page'] = 'dashboard'
+
+if 'feedback_count' not in st.session_state:
+    st.session_state['feedback_count'] = 0
 
 # ------------------- CSS Styling -------------------
 st.markdown("""
@@ -81,53 +85,102 @@ button:hover {
 </style>
 """, unsafe_allow_html=True)
 
-# ------------------- Sidebar / Settings -------------------
+# ------------------- Sidebar -------------------
 st.sidebar.title("Settings ⚙️")
 username = st.sidebar.text_input("Username")
 st.sidebar.button("Update Profile")
 
-# ------------------- Header -------------------
-# Random inspiring quotes
-quotes = [
-    "Every child is a star in their own way ✨",
-    "Learning is a journey, not a race 🚀",
-    "Empower. Educate. Excel 💡",
-    "Small steps lead to big achievements 🏆"
-]
+# ------------------- Page Routing -------------------
+page = st.session_state['page']
 
-st.markdown(f"""
-<div class="header">
-    <h1>Welcome, {username if username else 'LexiAI User'}!</h1>
-    <p>{random.choice(quotes)}</p>
-</div>
-""", unsafe_allow_html=True)
+# ------------------- Dashboard -------------------
+if page == 'dashboard':
+    quotes = [
+        "Every child is a star in their own way ✨",
+        "Learning is a journey, not a race 🚀",
+        "Empower. Educate. Excel 💡",
+        "Small steps lead to big achievements 🏆"
+    ]
 
-# ------------------- Dashboard Sections -------------------
-st.markdown('<div class="section"><h2>Explore</h2></div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="header">
+        <h1>Welcome, {username if username else 'LexiAI User'}!</h1>
+        <p>{random.choice(quotes)}</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Cards
-st.markdown("""
-             <div class="cards">
-              <div class="card" onclick="alert('Read and Learn clicked!')">
-                <h3>📚 Read and Learn</h3>
-                <p>Explore interactive lessons and reading materials</p>
-              </div>
-              <div class="card"onclick="alert('Math Buddy clicked!')">
-              <h3>🧮 Math Buddy</h3>
-              <p>AI-assisted problem solving and hints for children</p>
-              </div> <div class="card" onclick="alert('Activities clicked!')">
-             <h3>🎨 Activities</h3> <p>Fun learning activities and games</p>
-             </div>
-             </div> 
-            """, unsafe_allow_html=True)
+    st.markdown('<div class="section"><h2>Explore</h2></div>', unsafe_allow_html=True)
 
+    # Cards as columns with buttons
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("📚 Read and Learn"):
+            st.session_state['page'] = 'read_and_learn'
+            st.rerun()
+        st.markdown("""
+        <div class="card">
+            <h3>📚 Read and Learn</h3>
+            <p>Explore interactive lessons and reading materials</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-# ------------------- Quick Stats / Footer -------------------
-st.markdown("""
-<div class="section" style="margin-top:50px;">
-    <h2>Quick Links</h2>
-    <button onclick="window.location.href='#'">View Progress</button>
-    <button onclick="window.location.href='#'">Support</button>
-    <button onclick="window.location.href='#'">Feedback</button>
-</div>
-""", unsafe_allow_html=True)
+    with col2:
+        if st.button("🧮 Math Buddy"):
+            st.session_state['page'] = 'math_buddy'
+            st.rerun()
+        st.markdown("""
+        <div class="card">
+            <h3>🧮 Math Buddy</h3>
+            <p>AI-assisted problem solving and hints for children</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col3:
+        st.markdown("""
+        <div class="card">
+            <h3>🎨 Activities</h3>
+            <p>Fun learning activities and games</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Quick Links
+    st.markdown('<div class="section"><h2>Quick Links</h2></div>', unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Support / Feedback"):
+            st.session_state['page'] = 'feedback'
+            st.experimental_rerun()
+    with col2:
+        st.markdown('[Email us](mailto:lexiai@gmail.com)', unsafe_allow_html=True)
+
+# ------------------- Read and Learn Page -------------------
+elif page == 'read_and_learn':
+    st.title("📚 Read and Learn")
+    st.write("Welcome to the Read and Learn section!")
+    if st.button("⬅️ Back to Dashboard"):
+        st.session_state['page'] = 'dashboard'
+        st.experimental_rerun()
+
+# ------------------- Math Buddy Page -------------------
+elif page == 'math_buddy':
+    st.title("🧮 Math Buddy")
+    st.write("Solve problems and get AI hints here!")
+    if st.button("⬅️ Back to Dashboard"):
+        st.session_state['page'] = 'dashboard'
+        st.experimental_rerun()
+
+# ------------------- Feedback Page -------------------
+elif page == 'feedback':
+    st.title("💬 Feedback & Support")
+    rating = st.slider("Rate LexiAI:", 1, 5, 3)
+    feedback_text = st.text_area("Write your feedback:")
+
+    if st.button("Submit Feedback"):
+        st.session_state['feedback_count'] += 1
+        st.success(f"Thanks for your feedback! Total feedback received: {st.session_state['feedback_count']}")
+        st.write("Your rating:", rating)
+        st.write("Your message:", feedback_text)
+
+    if st.button("⬅️ Back to Dashboard"):
+        st.session_state['page'] = 'dashboard'
+        st.experimental_rerun()

@@ -1,6 +1,10 @@
 streamlit
 gtts
-sounddevice
-wavio
-pyttsx3
 speechrecognition
+pyttsx3
+phonetics
+difflib
+streamlit-webrtc
+soundfile
+numpy
+av
